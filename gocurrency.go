@@ -1,6 +1,7 @@
 package gocurrency
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -10,8 +11,8 @@ import (
 	"golang.org/x/text/currency"
 )
 
-//http://download.finance.yahoo.com/d/quotes.csv?e=.csv&f=sl1d1t1&s=USDCNY=X
-const baseUrl = "http://download.finance.yahoo.com/d/quotes.csv?e=.csv&f=sl1d1t1&s=%s=X"
+const baseURL = "https://openexchangerates.org/api/latest.json?app_id=%s"
+const appID = ""
 
 func CurrencyRate(from, to string) (float64, error) {
 	if _, err := currency.ParseISO(from); err != nil {
@@ -22,14 +23,36 @@ func CurrencyRate(from, to string) (float64, error) {
 		return 0, err
 	}
 
-	url := fmt.Sprintf(baseUrl, from+to)
-
+	url := fmt.Sprintf(baseURL, appID)
 	buf, err := request(url)
 	if err != nil {
 		return 0, err
 	}
 
-	return convent(buf)
+	rates, err := unmarshal(buf)
+	if err != nil {
+		return 0, err
+	}
+
+	fi, ok := rates[from]
+	if !ok {
+		return 0, fmt.Errorf("currency rate not found %v", from)
+	}
+	ti, ok := rates[to]
+	if !ok {
+		return 0, fmt.Errorf("currency rate not found %v", to)
+	}
+
+	fv, ok := fi.(float64)
+	if !ok {
+		return 0, fmt.Errorf("currency rate is not float64 %T %v", fi, fi)
+	}
+	tv, ok := ti.(float64)
+	if !ok {
+		return 0, fmt.Errorf("currency rate is not float64 %T %v", ti, ti)
+	}
+
+	return compute(tv, fv)
 }
 
 func request(url string) ([]byte, error) {
@@ -46,7 +69,27 @@ func request(url string) ([]byte, error) {
 	return ioutil.ReadAll(resp.Body)
 }
 
-func convent(buf []byte) (float64, error) {
-	s := string(buf[11:17])
+func unmarshal(buf []byte) (map[string]interface{}, error) {
+	var data map[string]interface{}
+	if err := json.Unmarshal(buf, &data); err != nil {
+		return nil, err
+	}
+	rates, ok := data["rates"]
+	if !ok {
+		return nil, fmt.Errorf("rates not found")
+	}
+	v, y := rates.(map[string]interface{})
+	if !y {
+		return nil, fmt.Errorf("rates not right")
+	}
+	return v, nil
+}
+
+func compute(x, y float64) (float64, error) {
+	if y == 0 {
+		return 0, fmt.Errorf("value is 0")
+	}
+	v := x / y
+	s := fmt.Sprintf("%.3f", v)
 	return strconv.ParseFloat(s, 64)
 }
